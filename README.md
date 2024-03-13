@@ -126,3 +126,30 @@ To run this solution over sample test case, run the following command:
 cat testcase-sample.txt | go run leaky-bucket.go
 ```
 
+## Designing cluster challenge
+
+To implement an API Gateway cluster with the same ratelimiter, we need to make sure the ratelimiter is shared across all the API Gateway instances. To achieve this, we need to use a centralized storage (prefer memory store) like Redis to store the ratelimiter's data. Overall design:
+
+![API Gateway system](ratelimiter.png)
+
+In this design, I place a Load Balancer in front of the API Gateway instances. The Load Balancer will distribute the incoming requests to the API Gateway instances. Then, each API Gateway instance will connect to the Redis server to update the ratelimiter's data and make decisions based on it.
+
+### The bottleneck
+
+Since the API Gateway instances are stateless, the bottleneck of this design will be the Redis server. To solve this problem, based on the requirement about request characteristics, we will choose between the Redis Sentinel and Redis Cluster to deploy this centralized storage. Redis Sentinel will make our storage High Availability but still not scalable. On the other hand, Redis Cluster will distribute the data across multiple Redis instances and make our storage scalable. But to utilize the Redis Cluster, we need to store the data with difference keys based on request characteristics so that we can fully utilize the Redis Cluster's sharding feature.
+
+For example, if we have only few global ratelimiters and using a few Redis key to store the data, then using Redis Cluster will not help us much. But if we have a lot of ratelimiters based on client's ip address, then we can use the Redis Cluster to store the data with many different keys.
+
+### The performance
+
+Since Redis is a memory-based storage, the performance of Redis itself is not a big problem. But the performance of the API Gateway will be affected not only by the Redis server but also by the network latency between it and the Redis server. So if the network latency is too high, the API Gateway will be slowed down.
+
+One thing that needs to be considered is the ability to handle high load during Brute Force attack or DDOS attack. Checking every request with Redis in a synchonous way will make the API Gateway to be blocked by malicious requests and affecting other good requests. In that situation, I think we should sacrifice the accuracy of the ratelimiter and implement some modifications to make the API Gateway more resilient:
+
+- Using a faster algorithm to calculate the ratelimiter's data, such as the leaky bucket algorithm or sliding window based on fixed window request counter.
+- Instead of checking every request with the ratelimiter, only check for blocked characteristics like client's ip address in some Blacklist. We can store those Blacklist in the memory of each API Gateway instance and sync them with the Redis server periodically or using a pub/sub mechanism.
+- Increase request counter in the background through bulk operations so that the API Gateway's performance will not be affected much by the high load.
+
+![API Gateway system](ratelimiter-blacklist.png)
+
+This approach can let some bad requests pass through as it doesn't check ratelimiter when serving requests. But to serve a massive amount of requests, it will be an acceptable tradeoff to boost the API Gateway's performance.
