@@ -1,36 +1,25 @@
-# ratelimiter-example
+package main
 
-Example of implementing a ratelimiter
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"time"
+)
 
-## The problem
-
-> Implement a simple ratelimiter in API Gateway to ensure resistance to Brute Force attacks and DDOS attacks.
-
-## Coding challenge
-
-### Prerequisites
-
-- Golang 1.22
-
-### Solution 1: The sliding window algorithm (with counter per second)
-
-I choose grouping by second as the unit of time, and store the counter per second to ensure the minimum precision of the ratelimiter is one second.
-
-**Pros:**
-
-- Very accurate, the minimum precision of the ratelimiter is one second.
-- This algorithm is simple and easy to implement both in the API Gateway itself or in the centralize store like Redis (using SortedSet)
-
-**Cons:**
-
-- Memory usage grows linearly with window duration (but can be controlled)
-- Not effective because we need to loop through all the counter to remove the expired ones and sum them to find the number of requests in the current window.
-
-```golang
 type SlidingWindowRateLimiter struct {
 	rate           int           // Maximum number of requests allowed in the windowDuration.
 	windowDuration time.Duration // Duration of the sliding window.
 	requests       map[int64]int // Map to hold request counts for each second within the window.
+}
+
+// NewSlidingWindowRateLimiter creates a new rate limiter instance.
+func NewSlidingWindowRateLimiter(rate int, windowDuration time.Duration) *SlidingWindowRateLimiter {
+	return &SlidingWindowRateLimiter{
+		rate:           rate,
+		windowDuration: windowDuration,
+		requests:       make(map[int64]int),
+	}
 }
 
 // AllowRequest determines whether a new request at the current time should be allowed.
@@ -59,10 +48,34 @@ func (rl *SlidingWindowRateLimiter) AllowRequest(requestTime time.Time) bool {
 	// Otherwise, deny the request.
 	return false
 }
-```
 
-To run this solution over sample test case, run the following command:
+func main() {
+	scanner := bufio.NewScanner(os.Stdin)
 
-```bash
-cat testcase-sample.txt | go run sliding-window-counter.go
-```
+	// Read the first line for number of request and requests per hour.
+	var n, r int
+	fmt.Scan(&n, &r)
+
+	// Initialize the rate limiter with a rate of r requests per hour.
+	rateLimiter := NewSlidingWindowRateLimiter(r, time.Hour)
+
+	for i := 0; i < n; i++ {
+		if !scanner.Scan() {
+			fmt.Println("Error reading time input")
+			return
+		}
+		timestampStr := scanner.Text()
+		timestamp, err := time.Parse(time.RFC3339, timestampStr)
+		if err != nil {
+			fmt.Printf("Error parsing time: %v\n", err)
+			continue
+		}
+
+		allowed := rateLimiter.AllowRequest(timestamp)
+		if allowed {
+			fmt.Println("true")
+		} else {
+			fmt.Println("false")
+		}
+	}
+}
